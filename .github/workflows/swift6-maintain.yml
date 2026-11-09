@@ -40,7 +40,7 @@ concurrency:
 jobs:
   gate:
     if: github.event_name == 'push' || github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: macos-15
     timeout-minutes: 15
     outputs:
       proceed_release: ${{ steps.decide.outputs.proceed_release }}
@@ -68,7 +68,7 @@ jobs:
 
   sync:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: macos-15
     timeout-minutes: 15
     permissions:
       contents: write
@@ -104,7 +104,7 @@ jobs:
       (needs.gate.result == 'success' || needs.sync.result == 'success') &&
       (needs.gate.result == 'success' || needs.gate.result == 'skipped') &&
       (needs.sync.result == 'success' || needs.sync.result == 'skipped')
-    runs-on: ubuntu-latest
+    runs-on: macos-15
     timeout-minutes: 5
     outputs:
       proceed_release: ${{ steps.out.outputs.proceed_release }}
@@ -167,7 +167,24 @@ jobs:
           persist-credentials: false
           ref: ${{ needs.plan.outputs.upstream_sha }}
           path: upstream
+      - name: Restore SwiftPM build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/swiftpm-cache
+            ${{ runner.temp }}/fork-check/macos
+            ${{ runner.temp }}/fork-check/ios-simulator
+            ${{ runner.temp }}/fork-check/ios-device
+            ${{ runner.temp }}/upstream-check/macos
+            ${{ runner.temp }}/upstream-check/ios-simulator
+            ${{ runner.temp }}/upstream-check/ios-device
+            ~/Library/Caches/org.swift.swiftpm
+          key: swift6-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Package.swift', '**/core/src/**', '**/wrappers/ios/Sources/**') }}
+          restore-keys: |
+            swift6-${{ runner.os }}-${{ runner.arch }}-
       - name: Verify the maintenance tree
+        env:
+          SWIFTPM_CACHE_PATH: ${{ runner.temp }}/swiftpm-cache
         if: needs.plan.outputs.verify_fork == 'true'
         run: bash scripts/patches/swift6/verify.sh "$GITHUB_WORKSPACE/fork" "$RUNNER_TEMP/fork-check"
       - name: Replay the header patch twice
@@ -181,6 +198,8 @@ jobs:
           git -C upstream diff > "$RUNNER_TEMP/swift6-ios.patch"
       - name: Verify the patched upstream tree
         if: needs.plan.outputs.verify_replay == 'true'
+        env:
+          SWIFTPM_CACHE_PATH: ${{ runner.temp }}/swiftpm-cache
         run: bash scripts/patches/swift6/verify.sh "$GITHUB_WORKSPACE/upstream" "$RUNNER_TEMP/upstream-check"
       - name: Compare module maps
         if: needs.plan.outputs.compare_modulemap == 'true'
@@ -203,7 +222,7 @@ jobs:
     if: >-
       (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
       needs.plan.outputs.proceed_release == 'true'
-    runs-on: ubuntu-latest
+    runs-on: macos-15
     timeout-minutes: 10
     permissions:
       contents: write

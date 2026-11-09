@@ -21,15 +21,28 @@ printf 'import ZXingCpp\nlet reader = ZXIBarcodeReader()\n' > "$scratch/import-s
     swift --version
 } | tee "$scratch/toolchain.txt"
 
-# A fresh module cache prevents a previously compiled PCM from hiding header warnings.
-xcrun swiftc -typecheck -module-cache-path "$scratch/fresh-module-cache" \
+# This directory is never reused. A restored PCM must not hide the umbrella diagnostics.
+module_cache="$(mktemp -d "${TMPDIR:-/tmp}/zxing-module-cache.XXXXXX")"
+xcrun swiftc -typecheck -module-cache-path "$module_cache" \
     -I "$wrapper" -Xcc -Werror=incomplete-umbrella "$scratch/import-smoke.swift"
-swift build --package-path "$source_root" --scratch-path "$scratch/macos"
-swift build --package-path "$source_root" \
+
+swiftpm_cache="${SWIFTPM_CACHE_PATH:-$scratch/swiftpm-cache}"
+mkdir -p "$swiftpm_cache"
+swift_build() {
+    swift build \
+        --package-path "$source_root" \
+        --cache-path "$swiftpm_cache" \
+        --enable-dependency-cache \
+        --enable-build-manifest-caching \
+        --manifest-cache shared \
+        "$@"
+}
+swift_build --scratch-path "$scratch/macos"
+swift_build \
     --triple arm64-apple-ios16.0-simulator \
     --sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)" \
     --scratch-path "$scratch/ios-simulator"
-swift build --package-path "$source_root" \
+swift_build \
     --triple arm64-apple-ios16.0 \
     --sdk "$(xcrun --sdk iphoneos --show-sdk-path)" \
     --scratch-path "$scratch/ios-device"

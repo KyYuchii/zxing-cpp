@@ -14,7 +14,9 @@ CMakeLists.txt.user
 
 # XCode/Swift
 .swiftpm
+.swiftpm-cache
 .build
+.derivedData
 
 # JetBrain (AndroidStudio, clion)
 .idea

@@ -25,7 +25,9 @@ bash patches/swift6/verify.sh /path/to/patched/source /tmp/zxing-swift6-check
 `apply.sh` is idempotent. A conflict exits with an error and does not drop the
 patch. `verify.sh` uses a fresh Clang module cache, turns incomplete-umbrella
 diagnostics into errors, then builds the native package, the arm64 iOS
-Simulator library, and the arm64 iOS device SDK library.
+Simulator library, and the arm64 iOS device SDK library. SwiftPM reuses
+`--cache-path` and the scratch build directories. The module cache used for
+the umbrella check is not reused.
 
 ## Workflow
 
@@ -41,8 +43,10 @@ Simulator library, and the arm64 iOS device SDK library.
    verified commit. An existing tag is left untouched. This does not create a
    GitHub Release.
 
-The scheduled workflow runs only after this file is on the default branch,
-`master`. That daily run publishes the tag. Push and pull request runs verify
-the branch and do not publish. A manual run publishes only when its publish
-input is enabled. Passing another upstream tag or commit checks compatibility
-and does not move the branch or publish a tag.
+Every job runs on `macos-15`. The header check stays on a fresh module cache,
+while SwiftPM build products and `~/Library/Caches/org.swift.swiftpm` are
+restored from the GitHub Actions cache. The scheduled workflow runs only after
+this file is on the default branch, `master`. That daily run publishes the tag.
+Push and pull request runs verify the branch and do not publish. A manual run
+publishes only when its publish input is enabled. Passing another upstream tag
+or commit checks compatibility and does not move the branch or publish a tag.
