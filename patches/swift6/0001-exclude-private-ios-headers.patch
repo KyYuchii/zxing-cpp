@@ -1,0 +1,14 @@
+diff --git a/wrappers/ios/Sources/Wrapper/module.modulemap b/wrappers/ios/Sources/Wrapper/module.modulemap
+index 0d334fc7..ea2eb1d7 100644
+--- a/wrappers/ios/Sources/Wrapper/module.modulemap
++++ b/wrappers/ios/Sources/Wrapper/module.modulemap
+@@ -1,5 +1,9 @@
+ module ZXingCpp {
+     umbrella header "UmbrellaHeader.h"
++    // Internal C++ conversion helpers and build configuration are not Swift API.
++    exclude header "Reader/ZXIPosition+Helper.h"
++    exclude header "ZXIFormatHelper.h"
++    exclude header "Version.h"
+     export *
+     module * { export * }
+ }
