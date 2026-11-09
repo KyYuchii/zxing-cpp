@@ -16,18 +16,18 @@
 | upstream | `https://github.com/zxing-cpp/zxing-cpp` |
 | 原始基线 | `v3.1.1` |
 | 基线 commit | `287c85df6f961c8efbfb5ffd736cd9457b8b890e` |
-| 本地维护分支 | `rolep/ios-modulemap-3.1.1` |
+| 本地维护分支 | `fix/swift6-strict-concurrency` |
 | SwiftPM 产品/模块 | `ZXingCpp` |
 | 本地仓库 | `/Users/kyyuchiii./Developer/RoleP-iOS/Require/ZXingFork` |
 
-本地已有以下文件，但编写本文时仍是未提交改动，不能假定远端已经拥有它们：
+维护分支上的相关文件：
 
 - `wrappers/ios/Sources/Wrapper/module.modulemap` 的四行补丁。
-- `patches/rolep/0001-exclude-private-ios-headers.patch`。
-- `patches/rolep/apply.sh`：补丁重放、幂等性和冲突失败处理。
-- `patches/rolep/verify.sh`：全新模块缓存的 Swift 导入检查及 native package build。
-- `.github/workflows/rolep-ios-patch.yml`：初始 CI，不含发布步骤。
-- `patches/rolep/README.md`：早期说明，其中“尚未创建 origin/Fork”的描述已经过时，实施时更新。
+- `patches/swift6/0001-exclude-private-ios-headers.patch`。
+- `patches/swift6/apply.sh`：补丁重放、幂等性和冲突失败处理。
+- `patches/swift6/verify.sh`：全新模块缓存的 Swift 导入检查及 native package build。
+- `.github/workflows/swift6-maintain.yml`：每日 tag 判断、头文件 Warning 验证和 `vX.Y.Z-Fixed` 发布。
+- `patches/swift6/README.md`：早期说明，其中“尚未创建 origin/Fork”的描述已经过时，实施时更新。
 
 本地实际验证过：补丁重放、重复应用、以 `-Werror=incomplete-umbrella` 导入 Swift 模块、macOS SwiftPM 构建、arm64 iOS Simulator SwiftPM 构建。上游仍有其他 C++ 编译警告；不得把这次补丁描述为整个上游仓库零警告。GitHub 托管 runner 尚未验证。
 
@@ -67,7 +67,7 @@
 
 ## 3. CI：验证当前 Fork，也验证补丁可重放
 
-完善现有 `rolep-ios-patch.yml`，保留两条独立验证链：
+`.github/workflows/swift6-maintain.yml` 保留两条独立验证链：
 
 ### A. 当前 Fork 源码
 
@@ -123,7 +123,7 @@ swift build --package-path "$source_root" \
 ### 触发与 runner
 
 - PR：验证即将合并的源码。
-- Push：维护分支以及实际发布来源分支；不要只覆盖 `rolep/**` 而遗漏默认分支上的发布候选提交。
+- Push：维护分支 `fix/swift6-strict-concurrency`。定时同步和手动发布入口放在默认分支 `master`。
 - `workflow_dispatch`：接收上游兼容性测试 ref。
 - 可增加每周一次的上游兼容检查，失败仅报状态，不自动升级。
 - 初始 runner 使用 `macos-15`；实施时确认可用 Xcode/Swift 版本，在日志中记录。若 pin Xcode，选定已验证且 runner 支持的版本，不使用未经核验的路径。
@@ -136,7 +136,7 @@ swift build --package-path "$source_root" \
 
 新增独立发布 workflow，推荐手动 `workflow_dispatch`，输入明确的候选 commit SHA、发布 tag 和发布说明；默认不跟随浮动分支 HEAD。
 
-1. 校验 SHA 为完整十六进制提交号，tag 为约定格式，例如 `v3.1.1-rolep.1`。
+1. 校验 SHA 为完整十六进制提交号，tag 为约定格式，例如 `v3.1.1-Fixed`。
 2. 确认候选 SHA 已进入批准的发布来源分支；先完整 fetch，按明确分支检查祖先关系。
 3. checkout 这个精确 SHA，复用 CI，验证当前 Fork 源码及其补丁来源一致性。
 4. 校验不存在同名 tag 或 release；存在时失败，不覆盖、不删除后重建。
@@ -148,7 +148,7 @@ swift build --package-path "$source_root" \
 
 SwiftPM 直接消费 Git tag 和仓库内容。GitHub 自动生成的源码归档足够；只有未来确需二进制分发时才另行设计 XCFramework 与 checksum。
 
-`v3.1.1-rolep.1` 是独立的 SemVer prerelease 版本，RoleP 应显式 exact pin；不要使用宽泛范围，也不要覆盖 upstream 的 `v3.1.1`。
+`v3.1.1-Fixed` 是独立的 SemVer prerelease 版本，RoleP 应显式 exact pin；不要使用宽泛范围，也不要覆盖 upstream 的 `v3.1.1`。
 
 ## 5. Actions 权限和上游自带 workflows
 
