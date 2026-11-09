@@ -1,5 +1,9 @@
 module ZXingCpp {
     umbrella header "UmbrellaHeader.h"
+    // Internal C++ conversion helpers and build configuration are not Swift API.
+    exclude header "Reader/ZXIPosition+Helper.h"
+    exclude header "ZXIFormatHelper.h"
+    exclude header "Version.h"
     export *
     module * { export * }
 }
