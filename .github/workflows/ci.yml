@@ -1,7 +1,9 @@
 name: CI
 
 # Controls when the action will run. Triggers the workflow on push or pull request
-# events but only for the master branch
+# events but only for the master branch.
+# On this fork, scheduled work is the macOS and iOS jobs below. Ubuntu and Windows
+# jobs remain for an upstream merge and are not scheduled here.
 on:
   push:
     branches: [ master ]
@@ -18,7 +20,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
+        os: [macos-latest]
       # don't cancel all jobs just because one of them failed
       fail-fast: false
 
@@ -62,6 +64,8 @@ jobs:
       uses: hendrikmuhs/ccache-action@v1.2
       with:
         key: ${{ matrix.os }}
+        restore-keys: ${{ matrix.os }}
+        max-size: 2G
 
     - name: Configure
       run: >
@@ -98,7 +102,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest, ubuntu-24.04-arm, macos-15-intel, windows-11-arm]
+        os: [macos-latest, macos-15-intel]
 
     steps:
     - uses: actions/checkout@v6
@@ -137,6 +141,8 @@ jobs:
       uses: hendrikmuhs/ccache-action@v1.2
       with:
         key: ${{ matrix.os }}-exp
+        restore-keys: ${{ matrix.os }}-exp
+        max-size: 2G
 
     - name: Configure
       run: >
@@ -171,6 +177,7 @@ jobs:
         path: install
 
   build-ubuntu-gcc-12: # keep homebrew happy
+    if: github.repository == 'zxing-cpp/zxing-cpp'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v6
@@ -196,6 +203,7 @@ jobs:
       run: ctest -V --test-dir build
 
   build-ubuntu-asan-ubsan:
+    if: github.repository == 'zxing-cpp/zxing-cpp'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v6
@@ -224,6 +232,7 @@ jobs:
       run: ctest -V --test-dir build
 
   build-ubuntu-tsan:
+    if: github.repository == 'zxing-cpp/zxing-cpp'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v6
@@ -246,6 +255,7 @@ jobs:
       run: ctest -V --test-dir build
 
   build-old-writers:
+    if: github.repository == 'zxing-cpp/zxing-cpp'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v6
@@ -271,17 +281,30 @@ jobs:
       with:
         submodules: true
 
+    - name: Cache SwiftPM and DerivedData
+      uses: actions/cache@v4
+      with:
+        path: |
+          .build
+          .derivedData
+          .swiftpm-cache
+          ~/Library/Caches/org.swift.swiftpm
+        key: ios-swift-${{ runner.os }}-${{ hashFiles('Package.swift', 'core/src/**', 'wrappers/ios/**') }}
+        restore-keys: |
+          ios-swift-${{ runner.os }}-
+
     - name: Build the swift package
-      run: swift build
+      run: swift build --cache-path .swiftpm-cache --enable-dependency-cache --enable-build-manifest-caching --manifest-cache shared
 
     - name: Build the demo app
       working-directory: wrappers/ios/demo
-      run: xcodebuild build -scheme demo -sdk "iphonesimulator"
+      run: xcodebuild build -scheme demo -sdk "iphonesimulator" -derivedDataPath "${{ github.workspace }}/.derivedData"
 
     # - name: Validate the Pod
     #   run: pod lib lint --allow-warnings
 
   build-android:
+    if: github.repository == 'zxing-cpp/zxing-cpp'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v6
@@ -324,6 +347,7 @@ jobs:
       run: ./gradlew publishToMavenCentral --no-configuration-cache
 
   build-kn:
+    if: github.repository == 'zxing-cpp/zxing-cpp'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -372,12 +396,20 @@ jobs:
     strategy:
       matrix:
         python-version: ['3.12']
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [macos-latest]
 
     steps:
     - uses: actions/checkout@v6
       with:
         submodules: true
+
+    - name: Cache pip
+      uses: actions/cache@v4
+      with:
+        path: ~/Library/Caches/pip
+        key: pip-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('wrappers/python/pyproject.toml') }}
+        restore-keys: |
+          pip-${{ runner.os }}-${{ matrix.python-version }}-
 
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v6
@@ -407,6 +439,7 @@ jobs:
         path: wrappers/python/dist/*
 
   build-rust:
+    if: github.repository == 'zxing-cpp/zxing-cpp'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -440,6 +473,7 @@ jobs:
         path: wrappers/rust/target/package/*.crate
 
   build-wasm:
+    if: github.repository == 'zxing-cpp/zxing-cpp'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v6
@@ -490,6 +524,7 @@ jobs:
   #       path: build/dist
 
   build-tarball:
+    if: github.repository == 'zxing-cpp/zxing-cpp'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v6

@@ -1,0 +1,275 @@
+name: Swift 6 header maintenance
+
+on:
+  schedule:
+    # 08:00 Asia/Shanghai. The workflow file must stay on the default branch.
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: Optional upstream tag or full SHA. Leave empty to follow the latest stable tag.
+        required: false
+        default: ""
+      publish:
+        description: Publish vX.Y.Z-Fixed after the header check. Ignored when upstream_ref is set. The daily run publishes without this input.
+        type: boolean
+        required: false
+        default: false
+  push:
+    branches:
+      - fix/swift6-strict-concurrency
+    paths:
+      - patches/swift6/**
+      - wrappers/ios/Sources/Wrapper/**
+      - Package.swift
+      - .github/workflows/swift6-maintain.yml
+  pull_request:
+    paths:
+      - patches/swift6/**
+      - wrappers/ios/Sources/Wrapper/**
+      - Package.swift
+      - .github/workflows/swift6-maintain.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: swift6-maintain-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  gate:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: macos-15
+    timeout-minutes: 15
+    outputs:
+      proceed_release: ${{ steps.decide.outputs.proceed_release }}
+      verify_fork: ${{ steps.decide.outputs.verify_fork }}
+      verify_replay: ${{ steps.decide.outputs.verify_replay }}
+      compare_modulemap: ${{ steps.decide.outputs.compare_modulemap }}
+      upstream_tag: ${{ steps.decide.outputs.upstream_tag }}
+      upstream_sha: ${{ steps.decide.outputs.upstream_sha }}
+      release_tag: ${{ steps.decide.outputs.release_tag }}
+      candidate_sha: ${{ steps.decide.outputs.candidate_sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.ref }}
+      - name: Choose the upstream tag and maintenance commit
+        id: decide
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_UPSTREAM_REF: ${{ inputs.upstream_ref }}
+          INPUT_PUBLISH: ${{ inputs.publish }}
+        run: bash patches/swift6/decide.sh
+
+  sync:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: macos-15
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    outputs:
+      proceed_release: ${{ steps.decide.outputs.proceed_release }}
+      verify_fork: ${{ steps.decide.outputs.verify_fork }}
+      verify_replay: ${{ steps.decide.outputs.verify_replay }}
+      compare_modulemap: ${{ steps.decide.outputs.compare_modulemap }}
+      upstream_tag: ${{ steps.decide.outputs.upstream_tag }}
+      upstream_sha: ${{ steps.decide.outputs.upstream_sha }}
+      release_tag: ${{ steps.decide.outputs.release_tag }}
+      candidate_sha: ${{ steps.decide.outputs.candidate_sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ github.ref }}
+      - name: Sync the latest stable tag onto the maintenance branch
+        id: decide
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_UPSTREAM_REF: ${{ inputs.upstream_ref }}
+          INPUT_PUBLISH: ${{ inputs.publish }}
+          GH_TOKEN: ${{ github.token }}
+        run: bash patches/swift6/decide.sh
+
+  plan:
+    needs: [gate, sync]
+    if: >-
+      always() &&
+      (needs.gate.result == 'success' || needs.sync.result == 'success') &&
+      (needs.gate.result == 'success' || needs.gate.result == 'skipped') &&
+      (needs.sync.result == 'success' || needs.sync.result == 'skipped')
+    runs-on: macos-15
+    timeout-minutes: 5
+    outputs:
+      proceed_release: ${{ steps.out.outputs.proceed_release }}
+      verify_fork: ${{ steps.out.outputs.verify_fork }}
+      verify_replay: ${{ steps.out.outputs.verify_replay }}
+      compare_modulemap: ${{ steps.out.outputs.compare_modulemap }}
+      upstream_tag: ${{ steps.out.outputs.upstream_tag }}
+      upstream_sha: ${{ steps.out.outputs.upstream_sha }}
+      release_tag: ${{ steps.out.outputs.release_tag }}
+      candidate_sha: ${{ steps.out.outputs.candidate_sha }}
+    steps:
+      - name: Select the active decision
+        id: out
+        env:
+          proceed_release: ${{ needs.sync.outputs.proceed_release || needs.gate.outputs.proceed_release }}
+          verify_fork: ${{ needs.sync.outputs.verify_fork || needs.gate.outputs.verify_fork }}
+          verify_replay: ${{ needs.sync.outputs.verify_replay || needs.gate.outputs.verify_replay }}
+          compare_modulemap: ${{ needs.sync.outputs.compare_modulemap || needs.gate.outputs.compare_modulemap }}
+          upstream_tag: ${{ needs.sync.outputs.upstream_tag || needs.gate.outputs.upstream_tag }}
+          upstream_sha: ${{ needs.sync.outputs.upstream_sha || needs.gate.outputs.upstream_sha }}
+          release_tag: ${{ needs.sync.outputs.release_tag || needs.gate.outputs.release_tag }}
+          candidate_sha: ${{ needs.sync.outputs.candidate_sha || needs.gate.outputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          {
+            echo "proceed_release=${proceed_release}"
+            echo "verify_fork=${verify_fork}"
+            echo "verify_replay=${verify_replay}"
+            echo "compare_modulemap=${compare_modulemap}"
+            echo "upstream_tag=${upstream_tag}"
+            echo "upstream_sha=${upstream_sha}"
+            echo "release_tag=${release_tag}"
+            echo "candidate_sha=${candidate_sha}"
+          } >> "$GITHUB_OUTPUT"
+
+  verify:
+    needs: plan
+    if: needs.plan.outputs.verify_fork == 'true' || needs.plan.outputs.verify_replay == 'true'
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - name: Checkout trusted scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: scripts
+      - name: Checkout maintenance commit
+        if: needs.plan.outputs.verify_fork == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.plan.outputs.candidate_sha }}
+          path: fork
+      - name: Checkout upstream commit
+        if: needs.plan.outputs.verify_replay == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zxing-cpp/zxing-cpp
+          persist-credentials: false
+          ref: ${{ needs.plan.outputs.upstream_sha }}
+          path: upstream
+      - name: Restore SwiftPM build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/swiftpm-cache
+            ${{ runner.temp }}/fork-check/macos
+            ${{ runner.temp }}/fork-check/ios-simulator
+            ${{ runner.temp }}/fork-check/ios-device
+            ${{ runner.temp }}/upstream-check/macos
+            ${{ runner.temp }}/upstream-check/ios-simulator
+            ${{ runner.temp }}/upstream-check/ios-device
+            ~/Library/Caches/org.swift.swiftpm
+          key: swift6-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Package.swift', '**/core/src/**', '**/wrappers/ios/Sources/**') }}
+          restore-keys: |
+            swift6-${{ runner.os }}-${{ runner.arch }}-
+      - name: Verify the maintenance tree
+        env:
+          SWIFTPM_CACHE_PATH: ${{ runner.temp }}/swiftpm-cache
+        if: needs.plan.outputs.verify_fork == 'true'
+        run: bash scripts/patches/swift6/verify.sh "$GITHUB_WORKSPACE/fork" "$RUNNER_TEMP/fork-check"
+      - name: Replay the header patch twice
+        if: needs.plan.outputs.verify_replay == 'true'
+        run: |
+          set -euo pipefail
+          bash scripts/patches/swift6/apply.sh "$GITHUB_WORKSPACE/upstream"
+          bash scripts/patches/swift6/apply.sh "$GITHUB_WORKSPACE/upstream"
+          git -C upstream diff --check
+          git -C upstream rev-parse HEAD > "$RUNNER_TEMP/upstream-commit.txt"
+          git -C upstream diff > "$RUNNER_TEMP/swift6-ios.patch"
+      - name: Verify the patched upstream tree
+        if: needs.plan.outputs.verify_replay == 'true'
+        env:
+          SWIFTPM_CACHE_PATH: ${{ runner.temp }}/swiftpm-cache
+        run: bash scripts/patches/swift6/verify.sh "$GITHUB_WORKSPACE/upstream" "$RUNNER_TEMP/upstream-check"
+      - name: Compare module maps
+        if: needs.plan.outputs.compare_modulemap == 'true'
+        run: cmp "$GITHUB_WORKSPACE/fork/wrappers/ios/Sources/Wrapper/module.modulemap" "$GITHUB_WORKSPACE/upstream/wrappers/ios/Sources/Wrapper/module.modulemap"
+      - name: Upload verification records
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: swift6-header-check-${{ github.run_id }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/upstream-commit.txt
+            ${{ runner.temp }}/swift6-ios.patch
+            ${{ runner.temp }}/fork-check/toolchain.txt
+            ${{ runner.temp }}/upstream-check/toolchain.txt
+
+  release:
+    needs: [plan, verify]
+    if: >-
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
+      needs.plan.outputs.proceed_release == 'true'
+    runs-on: macos-15
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ needs.plan.outputs.candidate_sha }}
+      - name: Publish the Fixed tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ needs.plan.outputs.candidate_sha }}
+          UPSTREAM_TAG: ${{ needs.plan.outputs.upstream_tag }}
+          UPSTREAM_SHA: ${{ needs.plan.outputs.upstream_sha }}
+          RELEASE_TAG: ${{ needs.plan.outputs.release_tag }}
+          BRANCH: fix/swift6-strict-concurrency
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$UPSTREAM_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$UPSTREAM_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$RELEASE_TAG" == "${UPSTREAM_TAG}-Fixed" ]]
+          git fetch origin "refs/heads/${BRANCH}"
+          git merge-base --is-ancestor "$CANDIDATE_SHA" FETCH_HEAD
+          git grep -F -q 'exclude header "Reader/ZXIPosition+Helper.h"' "$CANDIDATE_SHA" -- wrappers/ios/Sources/Wrapper/module.modulemap
+          git grep -F -q 'exclude header "ZXIFormatHelper.h"' "$CANDIDATE_SHA" -- wrappers/ios/Sources/Wrapper/module.modulemap
+          git grep -F -q 'exclude header "Version.h"' "$CANDIDATE_SHA" -- wrappers/ios/Sources/Wrapper/module.modulemap
+          if git ls-remote --tags origin "refs/tags/${RELEASE_TAG}" | grep -q .; then
+            echo "Refusing to overwrite ${RELEASE_TAG}." >&2
+            exit 1
+          fi
+          tag_message="$(printf '%s\n' "RoleP iOS header fix for ${UPSTREAM_TAG}." "" "Upstream-Tag: ${UPSTREAM_TAG}" "Upstream-SHA: ${UPSTREAM_SHA}" "Candidate-SHA: ${CANDIDATE_SHA}")"
+          tag_object="$(gh api --method POST "repos/${GITHUB_REPOSITORY}/git/tags" \
+            -f tag="$RELEASE_TAG" \
+            -f message="$tag_message" \
+            -f object="$CANDIDATE_SHA" \
+            -f type="commit" \
+            --jq .sha)"
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+            -f ref="refs/tags/${RELEASE_TAG}" \
+            -f sha="$tag_object"
+          git fetch origin "refs/tags/${RELEASE_TAG}"
+          peeled="$(git rev-parse "FETCH_HEAD^{commit}")"
+          if [[ "$peeled" != "$CANDIDATE_SHA" ]]; then
+            echo "${RELEASE_TAG} points at ${peeled}, not ${CANDIDATE_SHA}. The tag was not moved." >&2
+            exit 1
+          fi
+          echo "Published ${RELEASE_TAG} at ${CANDIDATE_SHA}."
